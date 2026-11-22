@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finnish Personal Identity Code (PIC)</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #f4f6f8; color: #1d2733; margin: 0; padding: 24px; }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { margin-top: 0; }
+  section { background: #fff; border-radius: 8px; padding: 20px 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  label { display: block; font-weight: bold; margin-top: 12px; }
+  .hint { font-size: 0.9em; color: #5a6675; margin: 4px 0 8px; }
+  input[type=text] { font-size: 1.05em; padding: 8px; width: 220px; border: 1px solid #b8c2cc; border-radius: 4px; }
+  .radios label { display: inline; font-weight: normal; margin-right: 16px; }
+  button { margin-top: 16px; font-size: 1em; padding: 8px 18px; border: 0; border-radius: 4px; background: #2f5f94; color: #fff; cursor: pointer; }
+  button:hover { background: #244a74; }
+  .result { margin-top: 16px; padding: 12px 14px; border-radius: 4px; white-space: pre-line; display: none; }
+  .ok { background: #e3f4e8; border-left: 5px solid #2e8b57; display: block; }
+  .error { background: #fbe9e7; border-left: 5px solid #c0392b; display: block; }
+</style>
+</head>
+<body>
+<main>
+<h1>Finnish Personal Identity Code (PIC)</h1>
+<p>Format: <b>DDMMYYCZZZQ</b>. DDMMYY = date of birth, C = century sign, ZZZ = individual number
+(odd = male, even = female), Q = check character.
+Rules: <a href="https://dvv.fi/en/personal-identity-code" target="_blank">dvv.fi/en/personal-identity-code</a></p>
+
+<!-- PART 1: VALIDATE -->
+<section>
+  <h2>1. Check a personal identity code</h2>
+  <label for="picInput">Personal identity code</label>
+  <p class="hint">11 characters, for example 131052-308T</p>
+  <input type="text" id="picInput" maxlength="11" placeholder="131052-308T">
+  <br><button id="checkBtn">Check</button>
+  <div id="checkResult" class="result"></div>
+</section>
+
+<!-- PART 2a: CHECK CHARACTER -->
+<section>
+  <h2>2. Calculate the check character</h2>
+  <label for="partInput">First 10 characters of the code</label>
+  <p class="hint">DDMMYY + century sign + individual number, for example 131052-308</p>
+  <input type="text" id="partInput" maxlength="10" placeholder="131052-308">
+  <br><button id="charBtn">Calculate</button>
+  <div id="charResult" class="result"></div>
+</section>
+
+<!-- PART 2b: CREATE A NEW CODE -->
+<section>
+  <h2>3. Create a new personal identity code</h2>
+  <label for="dateInput">Date of birth</label>
+  <p class="hint">Format DD/MM/YYYY, for example 13/10/1952. Years 1800–2099 are allowed.</p>
+  <input type="text" id="dateInput" maxlength="10" placeholder="DD/MM/YYYY">
+  <label>Sex</label>
+  <div class="radios">
+    <input type="radio" name="sex" id="sexF" value="F"><label for="sexF">F (female)</label>
+    <input type="radio" name="sex" id="sexM" value="M"><label for="sexM">M (male)</label>
+  </div>
+  <button id="createBtn">Create code</button>
+  <div id="createResult" class="result"></div>
+</section>
+</main>
+
+<script>
+// ---------- Constants ----------
+
+// The check character is chosen from this table using (9-digit number) mod 31.
+const CHECK_CHARS = "0123456789ABCDEFHJKLMNPRSTUVWXY";
+
+// Century signs (DVV). Since 2023 there are extra signs for 1900s and 2000s.
+const CENTURY = {
+  "+": 1800,
+  "-": 1900, "Y": 1900, "X": 1900, "W": 1900, "V": 1900, "U": 1900,
+  "A": 2000, "B": 2000, "C": 2000, "D": 2000, "E": 2000, "F": 2000
+};
+
+// ---------- Small helper functions ----------
+
+function isLeapYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function daysInMonth(month, year) {
+  const days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month === 2 && isLeapYear(year)) return 29;
+  return days[month - 1];
+}
+
+function isDigits(text) {
+  return /^[0-9]+$/.test(text);
+}
+
+// ---------- Own function: check the front part DDMMYY ----------
+// Returns an error message, or "" if the date is correct.
+function checkDate(day, month, year) {
+  if (month < 1 || month > 12) {
+    if (day < 1 || day > 31) return "day and month are wrong";
+    return "month is wrong";
+  }
+  if (day < 1 || day > 31) return "day is wrong";
+  if (day > daysInMonth(month, year)) return "day or month is incorrect";
+  const birth = new Date(year, month - 1, day);
+  if (birth > new Date()) return "the date is in the future";
+  return "";
+}
+
+// Checks the first 10 characters (DDMMYYCZZZ).
+// Returns { error } or { day, month, year, individual }.
+function checkFrontPart(part) {
+  if (part.length !== 10) return { error: "the code must have 10 characters before the check character" };
+  const ddmmyy = part.substring(0, 6);
+  const sign = part.charAt(6);
+  const zzz = part.substring(7, 10);
+
+  if (!isDigits(ddmmyy)) return { error: "the first 6 characters (DDMMYY) must be digits" };
+  if (!(sign in CENTURY)) return { error: "the century sign '" + sign + "' is not allowed (use + - Y X W V U or A B C D E F)" };
+  if (!isDigits(zzz)) return { error: "the individual number (ZZZ) must be 3 digits" };
+
+  const day = parseInt(ddmmyy.substring(0, 2), 10);
+  const month = parseInt(ddmmyy.substring(2, 4), 10);
+  const year = CENTURY[sign] + parseInt(ddmmyy.substring(4, 6), 10);
+
+  const dateError = checkDate(day, month, year);
+  if (dateError) return { error: dateError };
+
+  const individual = parseInt(zzz, 10);
+  if (individual < 2 || individual > 999) return { error: "the individual number must be between 002 and 999" };
+
+  return { day, month, year, individual };
+}
+
+// ---------- Check character: number DDMMYYZZZ mod 31 ----------
+function calculateCheckChar(part) {
+  const nineDigits = part.substring(0, 6) + part.substring(7, 10);
+  return CHECK_CHARS.charAt(parseInt(nineDigits, 10) % 31);
+}
+
+// ---------- Age in years, months and days ----------
+function calculateAge(year, month, day) {
+  const today = new Date();
+  let years = today.getFullYear() - year;
+  let months = (today.getMonth() + 1) - month;
+  let days = today.getDate() - day;
+  if (days < 0) {
+    months--;
+    // borrow the days of the previous month
+    const prevMonth = today.getMonth() === 0 ? 12 : today.getMonth();
+    const prevYear = today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear();
+    days += daysInMonth(prevMonth, prevYear);
+  }
+  if (months < 0) {
+    years--;
+    months += 12;
+  }
+  return { years, months, days };
+}
+
+// ---------- Function 1: validate a full code ----------
+function validatePIC(input) {
+  const pic = input.trim().toUpperCase();
+  if (pic.length !== 11) return { valid: false, reason: "the code must be exactly 11 characters long" };
+
+  const front = checkFrontPart(pic.substring(0, 10));
+  if (front.error) return { valid: false, reason: front.error };
+
+  const expected = calculateCheckChar(pic);
+  if (pic.charAt(10) !== expected) return { valid: false, reason: "the check character is wrong" };
+
+  const sex = front.individual % 2 === 0 ? "Female" : "Male";
+  const age = calculateAge(front.year, front.month, front.day);
+  const temporary = front.individual >= 900;
+  return { valid: true, sex, age, temporary };
+}
+
+// ---------- Function 2: check character from the first 10 characters ----------
+function createCheckChar(input) {
+  const part = input.trim().toUpperCase();
+  const front = checkFrontPart(part);
+  if (front.error) return { error: front.error };
+  return { checkChar: calculateCheckChar(part), pic: part + calculateCheckChar(part) };
+}
+
+// ---------- Function 3: create a new code from DD/MM/YYYY and sex ----------
+function createPIC(dateText, sex) {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dateText.trim());
+  if (!match) return { error: "write the date as DD/MM/YYYY, for example 13/10/1952" };
+  if (sex !== "F" && sex !== "M") return { error: "choose the sex: F or M" };
+
+  const day = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+  if (year < 1800 || year > 2099) return { error: "the year must be between 1800 and 2099" };
+
+  const dateError = checkDate(day, month, year);
+  if (dateError) return { error: dateError };
+
+  // Century sign: + for 1800s, - for 1900s, A for 2000s
+  const sign = year < 1900 ? "+" : (year < 2000 ? "-" : "A");
+
+  // Random individual number 2...899: odd = male, even = female
+  let individual;
+  do {
+    individual = Math.floor(Math.random() * 898) + 2;   // 2...899
+  } while ((sex === "M" && individual % 2 === 0) || (sex === "F" && individual % 2 === 1));
+
+  const part = match[1] + match[2] + match[3].substring(2) + sign + String(individual).padStart(3, "0");
+  return { pic: part + calculateCheckChar(part) };
+}
+
+// ---------- Connect the functions to the page ----------
+function show(id, text, ok) {
+  const box = document.getElementById(id);
+  box.textContent = text;
+  box.className = "result " + (ok ? "ok" : "error");
+}
+
+document.getElementById("checkBtn").addEventListener("click", () => {
+  const input = document.getElementById("picInput").value;
+  const r = validatePIC(input);
+  if (!r.valid) {
+    show("checkResult", "input: " + input + "\nis valid: false, " + r.reason, false);
+    return;
+  }
+  show("checkResult",
+    "input: " + input.trim().toUpperCase() +
+    "\nis valid: true" +
+    "\nsex: " + r.sex +
+    "\nage: " + r.age.years +
+    "\n(" + r.age.years + " years " + r.age.months + " months " + r.age.days + " days)" +
+    (r.temporary ? "\nnote: individual number 900–999 = temporary code" : ""), true);
+});
+
+document.getElementById("charBtn").addEventListener("click", () => {
+  const input = document.getElementById("partInput").value;
+  const r = createCheckChar(input);
+  if (r.error) show("charResult", "input: " + input + "\nerror: " + r.error, false);
+  else show("charResult", "input: " + input.trim().toUpperCase() + "\noutput: " + r.checkChar + "\nfull code: " + r.pic, true);
+});
+
+document.getElementById("createBtn").addEventListener("click", () => {
+  const date = document.getElementById("dateInput").value;
+  const checked = document.querySelector("input[name=sex]:checked");
+  const r = createPIC(date, checked ? checked.value : "");
+  if (r.error) show("createResult", "error: " + r.error, false);
+  else show("createResult", "new personal identity code: " + r.pic + "\n(check it with part 1 above)", true);
+});
+
+// Enter key works in each field
+[["picInput", "checkBtn"], ["partInput", "charBtn"], ["dateInput", "createBtn"]].forEach(([field, btn]) => {
+  document.getElementById(field).addEventListener("keydown", e => {
+    if (e.key === "Enter") document.getElementById(btn).click();
+  });
+});
+</script>
+</body>
+</html>
